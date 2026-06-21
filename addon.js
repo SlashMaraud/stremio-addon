@@ -39,14 +39,11 @@ builder.defineStreamHandler(async ({ type, id }) => {
     try {
         console.log("Petición:", type, id);
 
-        // Películas: tt1234567
-        // Series: tt1234567:1:2
         const parts = id.split(":");
         const imdb = parts[0];
         const season = parts[1];
         const episode = parts[2];
 
-        // Buscar slug en Pelisflix
         const slug = await searchSlug(imdb);
         if (!slug) return { streams: [] };
 
@@ -55,8 +52,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
         if (type === "movie") {
             page = `${BASE_URL}${slug}`;
         } else {
-            // Para series, Pelisflix usa /episodio/
-            page = `${BASE_URL}/episodio/${slug.split("/")[2]}-${season}x${episode}/`;
+            const baseSlug = slug.split("/")[2];
+            page = `${BASE_URL}/episodio/${baseSlug}-${season}x${episode}/`;
         }
 
         const iframe = await getIframe(page);
