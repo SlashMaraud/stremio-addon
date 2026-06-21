@@ -1,77 +1,124 @@
 const { addonBuilder } = require("stremio-addon-sdk");
-const axios = require("axios");
-const cheerio = require("cheerio");
+const puppeteer = require("puppeteer-core");
 
-const BASE_URL = "https://pelisflix200.cc";
+const BASE = "https://pelisflix200.cc";
+const CHROME_PATH = "/usr/bin/google-chrome";
 
 const manifest = {
-    id: "community.pelisflix.iframes",
-    version: "1.1.0",
-    name: "Pelisflix (Películas + Series)",
-    description: "Addon rápido sin navegador, con soporte para series",
-    resources: ["stream"],
+    id: "community.pelisflix200.bypass.v3",
+    version: "7.1.0",
+    name: "Pelisflix200 (Bypass core)",
+    description: "Scraper con puppeteer-core + bypass de anuncios para pelisflix200.cc",
+    resources: ["stream", "catalog"],
     types: ["movie", "series"],
-    catalogs: []
+    idPrefixes: ["tt"],
+    catalogs: [
+        { type: "movie", id: "pelisflix-movies", name: "Pelisflix Movies" },
+        { type: "series", id: "pelisflix-series", name: "Pelisflix Series" }
+    ]
 };
 
 const builder = new addonBuilder(manifest);
 
-// Buscar slug en Pelisflix
-async function searchSlug(query) {
-    const url = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
-    const { data } = await axios.get(url);
-    const $ = cheerio.load(data);
-
-    const first = $(".result-item a").first().attr("href");
-    if (!first) return null;
-
-    return first.replace(BASE_URL, "");
-}
-
-// Extraer iframe
-async function getIframe(url) {
-    const { data } = await axios.get(url);
-    const $ = cheerio.load(data);
-    return $("iframe").attr("src") || null;
-}
-
-builder.defineStreamHandler(async ({ type, id }) => {
-    try {
-        console.log("Petición:", type, id);
-
-        const parts = id.split(":");
-        const imdb = parts[0];
-        const season = parts[1];
-        const episode = parts[2];
-
-        const slug = await searchSlug(imdb);
-        if (!slug) return { streams: [] };
-
-        let page;
-
-        if (type === "movie") {
-            page = `${BASE_URL}${slug}`;
-        } else {
-            const baseSlug = slug.split("/")[2];
-            page = `${BASE_URL}/episodio/${baseSlug}-${season}x${episode}/`;
+builder.defineCatalogHandler(() => ({
+    metas: [
+        {
+            id: "tt11378946",
+            type: "movie",
+            name: "Michael (Test)",
+            poster: "https://via.placeholder.com/300x450?text=Pelisflix200"
         }
+    ]
+}));
 
-        const iframe = await getIframe(page);
-        if (!iframe) return { streams: [] };
+async function buscarPorTitulo(titulo) {
+    const url = `${BASE}/?s=${encodeURIComponent(titulo)}`;
+    const res = await fetch(url);
+    const html = await res.text();
+    const match = html.match(/href="(https:\/\/pelisflix200\.cc\/pelicula\/[^"]+)"/);
+    return match ? match[1] : null;
+}
+
+async function obtenerM3U8(url) {
+    console.log("Lanzando navegador con puppeteer-core...");
+
+    const browser = await puppeteer.launch({
+        executablePath: CHROME_PATH,
+        headless: true,
+        args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--disable-popup-blocking"
+        ]
+    });
+
+    const page = await browser.newPage();
+
+    await page.setRequestInterception(true);
+    page.on("request", req => {
+        const blocked = ["doubleclick", "googlesyndication", "ads", "popunder"];
+        if (blocked.some(b => req.url().includes(b))) req.abort();
+        else req.continue();
+    });
+
+    browser.on("targetcreated", async target => {
+        if (target.type() === "page") {
+            const popup = await target.page();
+            await popup.close();
+        }
+    });
+
+    let m3u8 = null;
+
+    page.on("request", req => {
+        const u = req.url();
+        if (u.includes(".m3u8")) {
+            console.log("M3U8 detectado:", u);
+            m3u8 = u;
+        }
+    });
+
+    await page.goto(url, { waitUntil: "networkidle2" });
+
+    try {
+        await page.click("button, .vjs-big-play-button, .play");
+        await page.waitForTimeout(6000);
+    } catch (e) {
+        console.log("No se pudo hacer clic:", e);
+    }
+
+    await browser.close();
+    return m3u8;
+}
+
+builder.defineStreamHandler(async ({ type, id, extra }) => {
+    try {
+        const titulo = extra?.name;
+        if (!titulo) return { streams: [] };
+
+        const slugUrl = await buscarPorTitulo(titulo);
+        if (!slugUrl) return { streams: [] };
+
+        const m3u8 = await obtenerM3U8(slugUrl);
+        if (!m3u8) return { streams: [] };
 
         return {
             streams: [
                 {
-                    title: "Pelisflix",
-                    url: iframe
+                    title: "Pelisflix200 HD (Bypass core)",
+                    url: m3u8
                 }
             ]
         };
-
-    } catch (e) {
-        console.error(e);
+    } catch (err) {
+        console.log("ERROR STREAM:", err);
         return { streams: [] };
     }
 });
 
-module.exports = builder.getInterface();
+module.exports = {
+    manifest,
+    get: builder.getInterface().get
+};

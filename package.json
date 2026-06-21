@@ -1,13 +1,14 @@
 {
   "name": "stremio-pelisflix",
-  "version": "1.1.0",
+  "version": "1.0.0",
+  "description": "Addon Pelisflix200 con bypass y puppeteer-core",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "cheerio": "^1.0.0",
-    "stremio-addon-sdk": "^1.5.0"
+    "express": "4.18.2",
+    "stremio-addon-sdk": "1.6.5",
+    "puppeteer-core": "22.6.5"
   }
 }
