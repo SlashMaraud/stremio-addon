@@ -5,66 +5,76 @@ const cheerio = require("cheerio");
 const BASE_URL = "https://pelisflix200.cc";
 
 const manifest = {
-    id: "org.pelisflix200",
-    version: "1.0.0",
-    name: "Pelisflix 200",
-    description: "Addon actualizado para Pelisflix200.cc",
-    catalogs: [],
+    id: "community.pelisflix.iframes",
+    version: "1.1.0",
+    name: "Pelisflix (Películas + Series)",
+    description: "Addon rápido sin navegador, con soporte para series",
     resources: ["stream"],
     types: ["movie", "series"],
-    idPrefixes: ["pelisflix:"]
+    catalogs: []
 };
 
 const builder = new addonBuilder(manifest);
 
-async function getIframeSrc(pageUrl) {
-    const { data } = await axios.get(pageUrl, {
-        headers: {
-            "User-Agent": "Mozilla/5.0"
-        }
-    });
-
+// Buscar slug en Pelisflix
+async function searchSlug(query) {
+    const url = `${BASE_URL}/?s=${encodeURIComponent(query)}`;
+    const { data } = await axios.get(url);
     const $ = cheerio.load(data);
-    const iframeSrc = $("iframe").first().attr("src");
 
-    if (!iframeSrc) return null;
+    const first = $(".result-item a").first().attr("href");
+    if (!first) return null;
 
-    if (iframeSrc.startsWith("//")) return "https:" + iframeSrc;
-    if (iframeSrc.startsWith("/")) return BASE_URL + iframeSrc;
+    return first.replace(BASE_URL, "");
+}
 
-    return iframeSrc;
+// Extraer iframe
+async function getIframe(url) {
+    const { data } = await axios.get(url);
+    const $ = cheerio.load(data);
+    return $("iframe").attr("src") || null;
 }
 
 builder.defineStreamHandler(async ({ type, id }) => {
     try {
-        const cleanId = id.replace("pelisflix:", "");
-        let pageUrl;
+        console.log("Petición:", type, id);
+
+        // Películas: tt1234567
+        // Series: tt1234567:1:2
+        const parts = id.split(":");
+        const imdb = parts[0];
+        const season = parts[1];
+        const episode = parts[2];
+
+        // Buscar slug en Pelisflix
+        const slug = await searchSlug(imdb);
+        if (!slug) return { streams: [] };
+
+        let page;
 
         if (type === "movie") {
-            pageUrl = `${BASE_URL}/pelicula/${cleanId}/`;
-        } else if (type === "series") {
-            pageUrl = `${BASE_URL}/episodio/${cleanId}/`;
+            page = `${BASE_URL}${slug}`;
         } else {
-            return { streams: [] };
+            // Para series, Pelisflix usa /episodio/
+            page = `${BASE_URL}/episodio/${slug.split("/")[2]}-${season}x${episode}/`;
         }
 
-        const iframeSrc = await getIframeSrc(pageUrl);
-        if (!iframeSrc) return { streams: [] };
+        const iframe = await getIframe(page);
+        if (!iframe) return { streams: [] };
 
         return {
             streams: [
                 {
-                    title: "Pelisflix 200",
-                    url: iframeSrc
+                    title: "Pelisflix",
+                    url: iframe
                 }
             ]
         };
 
-    } catch (err) {
-        console.error(err);
+    } catch (e) {
+        console.error(e);
         return { streams: [] };
     }
 });
 
 module.exports = builder.getInterface();
-
